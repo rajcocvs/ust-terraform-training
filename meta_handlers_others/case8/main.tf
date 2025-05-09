@@ -21,7 +21,7 @@ provider "aws" {
 
 
 #case1
-variable "create_instance" {
+ variable "create_instance" {
   description = "Flag to control instance creation"
   type        = bool
   default     = true
@@ -95,3 +95,4 @@ resource "aws_instance" "example5" {
 
 
 
+ 
