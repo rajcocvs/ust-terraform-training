@@ -1,0 +1,64 @@
+This Terraform configuration dynamically selects an Amazon Machine Image (AMI) based on the AWS region, and then launches an EC2 instance in that region.
+
+✅ variables.tf
+1. Region AMIs Map
+
+variable "region_amis" {
+  type = map(string)
+  default = {
+    "us-east-1" = "ami-12345678"
+    "us-west-2" = "ami-87654321"
+  }
+}
+Explanation:
+
+This is a map variable (map(string)) that defines a mapping between AWS regions and their respective AMI IDs.
+
+Example:
+
+us-east-1 → ami-12345678
+
+us-west-2 → ami-87654321
+
+2. Region Variable
+
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}
+Explanation:
+
+This sets the default region to us-east-1 but allows it to be overridden if needed (e.g., via CLI or .tfvars).
+
+✅ main.tf
+AWS Provider
+
+provider "aws" {
+  region = var.region
+}
+Explanation:
+
+Configures the AWS provider to use the region defined in var.region.
+
+EC2 Instance Resource
+
+resource "aws_instance" "example" {
+  ami           = var.region_amis[var.region]
+  instance_type = "t2.micro"
+}
+Explanation:
+
+Launches an EC2 instance:
+
+ami is selected dynamically using var.region_amis[var.region].
+
+For example, if region = "us-east-1", it uses ami-12345678.
+
+instance_type is set to t2.micro, which is a free-tier eligible instance.
+
+🔁 Execution Summary
+Region is set (e.g., us-east-1).
+
+AMI is chosen dynamically from the region_amis map.
+
+Terraform launches an EC2 instance in that region with the selected AMI.
