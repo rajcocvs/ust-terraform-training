@@ -1,7 +1,7 @@
 provider "aws" {
   region = "us-east-1"
 }
-#Scenario 1:Real-Time Scenario: Deploying Infrastructure in Dev, Staging, and Prod
+#Scenario 1:Real-Time Scenario: Deploying Infrastructure in Dev, Staging, and Prod using tfvars
 
 variable "instance_type" {
   type = string

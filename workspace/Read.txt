@@ -8,35 +8,48 @@ terraform workspace select dev       # Switches to 'dev' workspace
 terraform workspace show             # Shows current workspace
 terraform apply 
 
->>Sample Scenarios:
+✅ Scenario 1: Real-Time Deployment for Dev, Staging, and Prod using Workspaces
+Code Summary:
 
-sample 1:Real-Time Scenario: Deploying Infrastructure in Dev, Staging, and Prod
-Suppose you manage:
+resource "aws_instance" "my_instance" {
+  ami           = "ami-0f88e80871fd81e91"
+  instance_type = var.instance_type
+  tags = {
+    Name = terraform.workspace
+  }
+}
+Explanation:
+Uses terraform.workspace to dynamically tag resources and change configurations per environment.
 
-VPC
+This assumes you've created workspaces like dev, staging, prod.
 
-EC2
+Example:
 
-RDS
+In dev, you might pass instance_type = "t2.micro"
 
-You want the same setup in:
+In prod, instance_type = "t3.large"
 
-Dev (smaller EC2)
+Use Case:
+Ideal for teams that want strong environment isolation.
 
-Staging (medium EC2)
+Each environment has:
 
-Prod (large EC2)
+Its own state file.
 
-Instead of copying code for each environment, you use workspaces with a single Terraform configuration and use variables that change per workspace.
+Individual apply/destroy cycles.
+
+Custom variables set using terraform.tfvars.
+
+Benefits:
+Clean separation.
+
+Safer deployments.
+
+Easier to rollback per environment.
 
 
 
-
-
-HYPOSTHIS FOR DISCUSSION:
-If your goal is to create multiple environments at once, use one workspace and loop in code instead:  
-
-Looping Without Workspaces (No Isolation):
+Looping Without Workspaces (No Isolation):(NOT BEST PRACTISE)
 variable "environments" {
   type = list(string)
   default = ["dev", "staging", "prod"]
@@ -44,41 +57,161 @@ variable "environments" {
 
 resource "aws_instance" "per_env" {
   count         = length(var.environments)
-  ami           = "ami-0c55b159cbfafe1f0"
+  ami           = "ami-0f88e80871fd81e91"
   instance_type = "t2.micro"
   tags = {
     Name = var.environments[count.index]
   }
 }
 
-But this loses the state isolation benefit of workspaces.
+✅ Scenario 2: Provisioning S3 Buckets per Environment
+Code Summary (Workspace-Based):
 
 
-When You Loop Over Resources in a Single Workspace
-You lose state isolation because everything is deployed and tracked in a single terraform.tfstate file. This means:
-| **Aspect**                     | **Looping in Single Workspace**              | **Using Workspaces**                                           |
-| ------------------------------ | -------------------------------------------- | -------------------------------------------------------------- |
-| **State File**                 | One state file for all environments          | Separate state file per workspace                              |
-| **Risk of Accidental Changes** | High — a mistake can affect all environments | Low — mistakes affect only the selected workspace              |
-| **Granular Destroy**           | No — destroys everything at once             | Yes — can destroy resources in just one workspace              |
-| **Deployment Control**         | All environments deployed at once            | Environments deployed one at a time                            |
-| **State Location**             | `.terraform/terraform.tfstate`               | `.terraform/terraform.tfstate.d/<workspace>/terraform.tfstate` |
+resource "aws_s3_bucket" "logs" {
+  bucket = "logs-${terraform.workspace}-bucket"
+}
+Alternative (Looping-Based):
+
+variable "environments" {
+  default = ["dev", "staging", "prod"]
+}
+
+resource "aws_s3_bucket" "logs" {
+  count  = length(var.environments)
+  bucket = "logs-${var.environments[count.index]}-bucket"
+}
+Explanation:
+In workspace mode: each environment gets its own uniquely named bucket.
+
+In loop mode: you provision all environments at once in one state file.
+
+Use Case:
+If you need state isolation, prefer workspaces.
+
+If you want a quick deploy of all environments (e.g., in a sandbox), loop might be okay.
+
+Trade-Off Table:
+Feature    			Workspaces	          			    Looping
+State Isolation			 ✅ Yes	      					 ❌ No
+Risk of Mass Failure		❌ Low					⚠️ High – affects all environments
+Destructive Control		✅ Yes (per env)			❌ No (destroys all at once)
+Deployment Flexibility		✅ Deploy one env at a time		❌ All at once
 
 
 
-Scenarios 2: Scenario: Provisioning S3 Buckets for Dev, Staging, and Prod
-You want to provision a uniquely named S3 bucket for:
-
-Development (logs-dev-bucket)
-
-Staging (logs-staging-bucket)
-
-Production (logs-prod-bucket)
 
 
-Looping Without Workspaces (No Isolation):
+
+✅ Scenario 3: VPC per Environment with Conditional CIDR Blocks
 
 
+resource "aws_vpc" "main" {
+  cidr_block = "10.${terraform.workspace == "prod" ? 0 : terraform.workspace == "staging" ? 1 : 2}.0.0/16"
+  tags = {
+    Name = "${terraform.workspace}-vpc"
+  }
+}
+Explanation:
+Dynamically assigns VPC CIDRs based on workspace:
+
+prod → 10.0.0.0/16
+
+staging → 10.1.0.0/16
+
+dev → 10.2.0.0/16
+
+Ensures non-overlapping network ranges per environment.
+
+Use Case:
+Perfect for staging vs. prod separation in multi-tier environments.
+
+Helps avoid IP conflicts and simplifies route tables and peering later.
+
+Benefits:
+Clean logical separation.
+
+Easily extendable to peered networks or hybrid cloud.
+
+✅ Scenario 4: RDS per Environment with Varying Sizes
+Code Summary:
+
+resource "aws_db_instance" "db" {
+  identifier        = "app-db-${terraform.workspace}"
+  instance_class    = terraform.workspace == "prod" ? "db.t3.large" : "db.t3.micro"
+  allocated_storage = terraform.workspace == "prod" ? 100 : 20
+  engine            = "mysql"
+  username          = "admin"
+  password          = "admin123"
+  skip_final_snapshot = true
+}
+Explanation:
+Adjusts database size and performance based on the environment.
+
+Keeps prod high-performing, while dev/staging are cost-efficient.
+
+Use Case:
+Essential for companies who want:
+
+Cost efficiency in dev
+
+Realistic testing in staging
+
+High performance in production
+
+Benefit:
+Reduces monthly cost.
+
+Avoids over-provisioning in non-critical environments.
+
+Allows realistic production simulation in staging if needed.
+
+✅ General Hypothesis Discussion: Workspaces vs. Looping
+When to Use Workspaces:
+You need isolated state files.
+
+Teams deploy and manage environments independently.
+
+You want granular control over apply/destroy commands.
+
+Ideal for CI/CD pipelines where environments are deployed separately.
+
+When to Use Looping in One Workspace:
+You want to deploy all environments at once (like for quick PoC).
+
+You don’t need strong isolation.
+
+Easier to manage with a single backend.
+
+
+
+
+
+
+Scenario 1: Looping EC2 Instances per Environment
+
+variable "environments" {
+  type    = list(string)
+  default = ["dev", "staging", "prod"]
+}
+
+resource "aws_instance" "per_env" {
+  count         = length(var.environments)
+  ami           = "ami-0f88e80871fd81e91"
+  instance_type = lookup(
+    {
+      dev     = "t2.micro"
+      staging = "t2.medium"
+      prod    = "t3.large"
+    },
+    var.environments[count.index],
+    "t2.micro"
+  )
+  tags = {
+    Name = "ec2-${var.environments[count.index]}"
+  }
+}
+✅ Scenario 2: Looping S3 Buckets per Environment
 
 variable "environments" {
   type    = list(string)
@@ -89,5 +222,74 @@ resource "aws_s3_bucket" "logs" {
   count  = length(var.environments)
   bucket = "logs-${var.environments[count.index]}-bucket"
   acl    = "private"
+  tags = {
+    Environment = var.environments[count.index]
+  }
+}
+✅ Scenario 3: Looping VPCs per Environment
+
+
+variable "environments" {
+  type    = list(string)
+  default = ["dev", "staging", "prod"]
 }
 
+resource "aws_vpc" "per_env" {
+  count      = length(var.environments)
+  cidr_block = "10.${count.index}.0.0/16"
+
+  tags = {
+    Name = "${var.environments[count.index]}-vpc"
+  }
+}
+This sets:
+
+dev → 10.0.0.0/16
+
+staging → 10.1.0.0/16
+
+prod → 10.2.0.0/16
+
+Modify the logic if you want different CIDRs.
+
+✅ Scenario 4: Looping RDS Instances per Environment
+
+variable "environments" {
+  type    = list(string)
+  default = ["dev", "staging", "prod"]
+}
+
+resource "aws_db_instance" "db" {
+  count             = length(var.environments)
+  identifier        = "app-db-${var.environments[count.index]}"
+  engine            = "mysql"
+  username          = "admin"
+  password          = "admin123"
+  skip_final_snapshot = true
+
+  instance_class = lookup(
+    {
+      dev     = "db.t3.micro"
+      staging = "db.t3.micro"
+      prod    = "db.t3.large"
+    },
+    var.environments[count.index],
+    "db.t3.micro"
+  )
+
+  allocated_storage = lookup(
+    {
+      dev     = 20
+      staging = 20
+      prod    = 100
+    },
+    var.environments[count.index],
+    20
+  )
+}
+🔁 Summary of Looping Benefits (with Caveats)
+✅ Quick and concise for demos or POCs.
+
+❌ No state isolation (one terraform.tfstate tracks all).
+
+❌ One destroy removes everything.
